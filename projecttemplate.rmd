@@ -1,0 +1,991 @@
+---
+output:
+  html_document: default
+  pdf_document: default
+---
+Prosper Loan Data Analysis by Jessica Vargas
+========================================================
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, packages}
+# Load all of the packages that you end up using in your analysis in this code
+# chunk.
+library(gapminder)
+library(ggplot2)
+library(knitr)
+library(dplyr)
+library(scales)
+library(GGally)
+library(PerformanceAnalytics)
+library(gplots)
+library(corrplot)
+library(ggcorrplot)
+library(ggpubr)
+
+# Notice that the parameter "echo" was set to FALSE for this code chunk. This
+# prevents the code from displaying in the knitted HTML output. You should set
+# echo=FALSE for all code chunks in your file, unless it makes sense for your
+# report to show the code that generated a particular plot.
+
+# The other parameters for "message" and "warning" should also be set to FALSE
+# for other code chunks once you have verified that each plot comes out as you
+# want it to. This will clean up the flow of your report.
+
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, Load_the_Data}
+# Load the Data
+prosperLoanData <- read.csv("C:/Users/jlchan/Box Sync/Backups/Recent_Desktop/Udacity_DA_Nanodegree/prosperLoanData.csv")
+
+```
+
+This Prosper Loan data set contains 113,937 loans with 81 variables on each loan, including loan amount, borrower rate (or interest rate), current loan status, borrower income, borrower employment status, borrower credit history, and the latest payment information.
+
+##Data Cleansing
+Since this dataset has so many variables, I am only going to focus on 10-15 of them.
+
+First, I'll check if there are any duplicate listingkeys since that is identified as the unique key.
+
+
+####Number of duplicate keys
+```{r echo=FALSE, message=FALSE, warning=FALSE, Data_Cleansing}
+sum((duplicated(prosperLoanData$ListingNumber)))
+```
+
+
+
+####Number of duplicate rows in dataset
+```{r echo=FALSE, message=FALSE, warning=FALSE, Data_Cleansing99}
+sum((duplicated(prosperLoanData)))
+
+```
+
+Turns out there are duplicate listingkey ids, but no duplicate rows when including all variables. Let's example a listing that has a duplicate and see what the differences between each row are.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, Data_Cleansing1}
+# extract duplicate listingkeys
+#prosperLoanData[duplicated(prosperLoanData$ListingNumber),]
+
+# examine listing key
+prosperLoanData[prosperLoanData$ListingNumber==1023355,c("ListingNumber","ProsperScore")]
+
+```
+
+ProsperScore is the only variable that has different values in the 2 duplicate rows. Since I am not interested in analyzing this variable, 
+I will drop it and try de-duping again.
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, results="hide", Data_Cleansing2}
+#new dataframe without ps
+loan_data_final <- distinct(select(prosperLoanData, -ProsperScore))
+
+#check for dupes
+sum((duplicated(loan_data_final$ListingNumber)))
+
+```
+
+Duplicates have been removed. Now let's check which variables have missing data.
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE,results="hide",Data_Cleansing3}
+
+#drop ProsperScore column
+#Check for missing data 
+print("Null values per column")
+sapply(loan_data_final, function(x) sum(is.na(x)))
+
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, results="hide",Data_Cleansing4}
+
+#drop ProsperScore column
+#Check for missing data 
+#sapply(loan_data_final, function(x) sum(is.na(x)))
+
+#Extract month and year from date column
+loan_data_final$ListingCreationDate <- format(as.Date(loan_data_final$ListingCreationDate), 
+                                              "%Y-%m")
+
+#Create new dataframes  
+post2009 <- loan_data_final[ which(loan_data_final$ListingCreationDate>'2009-06-30'), ]
+pre2009 <- loan_data_final[ which(loan_data_final$ListingCreationDate<='2009-06-30'), ]
+
+#Factor some numeric columns
+loan_data_final$Term <- factor(loan_data_final$Term)
+
+#check levels
+#levels(loan_data_final$ListingCategory..numeric.)
+
+#factor listing cat 
+loan_data_final$ListingCategory..numeric. <- 
+  factor(loan_data_final$ListingCategory..numeric.)
+
+#hist(post2009$BorrowerRate)
+
+#Bin rate in post2009 dataframe
+#summary(post2009$BorrowerRate)
+
+post2009$rate_category <- cut(post2009$BorrowerRate, 
+                              breaks=c(0.00, 0.1359, 0.1875, 0.36), 
+                              labels=c("low","middle","high"))
+
+```
+
+
+# Univariate Plots Section
+
+##Credit Scores
+
+###5 number summary for CreditScoreRangeLower and CreditScoreRangeUpper
+
+```{r echo=FALSE, message=FALSE, warning=FALSE,Univariate_Plots}
+#Check five number summary for Credit Scores
+print("5 number summary for CreditScoreRangeLower")
+summary(loan_data_final$CreditScoreRangeLower)
+
+print("5 number summary for CreditScoreRangeUpper")
+summary(loan_data_final$CreditScoreRangeUpper)
+
+```
+
+The mins for credit score upper and lower ranges don't seem normal. They are too low and out of the normal credit.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE,results="hide",Univariate_Plots1}
+
+head(loan_data_final[loan_data_final$CreditScoreRangeLower==0,
+                     c("CreditScoreRangeLower", "CreditScoreRangeUpper")])
+
+
+```
+
+Data shows that 0 lower and 19 credit scores go hand in hand. Looks like those are pre-2009 data points. 
+They were still using CreditGrades. I will exclude these values from visualizations.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE,Univariate_Plots2}
+
+#Remove 0 and 19 from credit ranges
+credit_low<- select(filter(loan_data_final,CreditScoreRangeLower!=0),
+                    c(CreditScoreRangeLower))
+credit_high <-select(filter(loan_data_final,CreditScoreRangeUpper!=19),
+                    c(CreditScoreRangeUpper))
+
+#Distribution of Lower Range Credit Scores
+creditlow_hist<-ggplot(credit_low, aes(x=CreditScoreRangeLower)) +
+  geom_histogram(position="identity", alpha=0.5,binwidth=10)+
+  labs(title="Distribution of CreditScoreRangeLower",
+       x="Credit Scores", y = "Count")+theme_classic()
+creditlow_hist
+
+#Distribution of Upper Range Credit Scores
+credithigh_hist<-ggplot(credit_high, aes(x=CreditScoreRangeUpper)) +
+  geom_histogram(position="identity", alpha=0.5,binwidth=10)+
+  labs(title="Distribution of CreditScoreRangeUpper",
+       x="Credit Scores", y = "Count")+theme_classic()
+credithigh_hist
+
+print("Credit Range Lower summary")
+summary(credit_low)
+
+print("Credit Range Upper summary")
+summary(credit_high)
+
+```
+
+Upper and lower credit score ranges are normally distributed. 
+
+Let's take a look at pre-2009 credit data: CreditGrade
+
+##Credit Grades Frequency Table
+
+```{r echo=FALSE, message=FALSE, warning=FALSE,Univariate_Plots3}
+#Frequency table for credit grades
+ 
+credit_grades <- table(pre2009$CreditGrade)
+
+barplot(credit_grades,main="Credit Grade Distribution",xlab="Credit Grade")
+
+
+```
+
+For listings entered prior to July 2009, Credit Grade was assigned. The most frequent credit grade is C.
+
+
+## Prosper Ratings Distribution and summary
+
+```{r echo=FALSE, message=FALSE, warning=FALSE,Univariate_Plots4}
+#Frequency table for prosper rate
+
+ggplot(loan_data_final, aes(ProsperRating..numeric.)) +
+  geom_bar(aes(y=..prop.., group = 1)) +
+  scale_y_continuous(labels=percent_format())+ theme(axis.text.x = element_text(angle = 0, hjust = 1))
+
+summary(loan_data_final$ProsperRating..numeric.)
+
+```
+About 25% of customers have a prosper rating of 4.
+
+Let's look at the most common loan term & loan type
+
+
+## Univariate Bar Charts, other variables
+```{r echo=FALSE, message=FALSE, warning=FALSE,Univariate_Plots5}
+
+term_plot <- sort(table(loan_data_final$Term),decreasing=TRUE)
+
+cat_plot <- table(loan_data_final$ListingCategory..numeric.)
+
+#table(loan_data_final$ListingCategory..numeric.,loan_data_final$rate_category)
+
+#loan terms
+barplot(term_plot,main="Loan Term Distribution",xlab="Loan Term",ylab="Frequency")
+#listing category 
+barplot(cat_plot,main="Listing Category Distribution",xlab="Listing Category Code")
+
+
+```
+
+The most popular loan term is 36 months. Most frequent listing catergory is 1, which maps to Debt Consolidation in the data dictionary.
+
+###Borrower State Frequency Table (proportions)
+```{r echo=FALSE, message=FALSE, warning=FALSE,Univariate_Plots611}
+#borrower state stats
+sort(prop.table(table(loan_data_final$BorrowerState)),decreasing=TRUE)
+
+#sort(prop.table(table(post2009$ProsperRating..Alpha.)),decreasing=TRUE)
+
+
+```
+
+13% of borrowers are from CA.
+
+##Original Loan Amounts Summary,  Standard Deviation, and distribution plot
+```{r echo=FALSE, message=FALSE, warning=FALSE,Univariate_Plots6}
+#Five number summary and standard dev
+summary(loan_data_final$LoanOriginalAmount)
+#sd
+sd(loan_data_final$LoanOriginalAmount)
+
+#Histogram of loan amount
+hist(loan_data_final$LoanOriginalAmount, main="Histogram of Orignal Loan Amount", xlab="Loan Original Amount")
+
+```
+
+Average original loan amount is around $6300 (+/- 6200) so we have a wide spread of loan amounts. 
+The data is right skewed and multi-modal. 
+There is probably some relationship between income and loan amount.
+
+##Binning Borrower Rates & barplots
+```{r echo=FALSE, message=FALSE, warning=FALSE,Univariate_Plots7}
+
+#Get natural breaks from borrow rates
+summary(loan_data_final$BorrowerRate)
+
+#Create bins low, medium, high from quartiles
+loan_data_final$rate_category <- cut(loan_data_final$BorrowerRate, 
+  breaks=c(0, 0.13, 0.25, 0.5), labels=c("low","middle","high"))
+
+#plot bins
+rate_cat_plot <- sort(table(loan_data_final$rate_category),decreasing=TRUE)
+#rate_cat_plot
+barplot(rate_cat_plot,main="Borrower Rate Categories",ylab="Frequency")
+
+```
+
+I binned borrower rates into 3 different cateogories: low, medium, high. Most borrowers have middle interest rates.
+
+##Income 
+```{r echo=FALSE, message=FALSE, warning=FALSE,Univariate_Plots8}
+
+#table(loan_data_final$IncomeRange, exclude="Not displayed")
+
+income_plot <- sort(table(loan_data_final$IncomeRange,exclude="Not displayed"),
+                    decreasing=TRUE)
+
+par(mar=c(8, 4.1, 4.1, 2.1))
+barplot(income_plot,main="Income Range",las=2)
+
+#income_prop <- loan_data_final %>% count(IncomeRange) %>%
+
+#plot income proportions
+ggplot(loan_data_final, aes(IncomeRange)) +
+  geom_bar(aes(y=..prop.., group = 1)) +
+  scale_y_continuous(labels=percent_format())+ 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+```
+
+Around 50-60% of all customers who take out loans have an income range of $25,000-78,000.
+
+##Borrower Rate Distribution & Summary
+```{r echo=FALSE, message=FALSE, warning=FALSE,Univariate_Plots9}
+
+hist(loan_data_final$BorrowerRate, main="Borrower Rate Distribution", xlab="Rate")
+
+print("Borrower Rate Summary")
+summary(loan_data_final$BorrowerRate)
+
+```
+
+Borrower rate is multimodal with median rate of 0.184 and average of 0.1929.
+
+##Investors distribution, standard deviation and summary
+
+```{r echo=FALSE, message=FALSE, warning=FALSE,Univariate_Plots10}
+
+#histogram of investors
+hist(loan_data_final$Investors, main="Investors Distribution", xlab="Number of Investors")
+#sd
+sdi <-sd(loan_data_final$Investors)
+#summary
+summary(loan_data_final$Investors)
+
+#print sd
+cat("Standard deviation:", sdi)
+
+      
+```
+
+Investors is right skewed with most loans have a smaller number of investors. The mean number of investors is 80 +/- 103 which indicates a wide spread of data. I will transform this to normal distribution so I can further analyze against other variables.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE,Univariate_Plots11}
+
+#log transformation on investors variable
+loan_data_final$Investors<-log(loan_data_final$Investors)
+
+hist(loan_data_final$Investors, main="Investors Distribution(log)",xlab="log(Investors distribution")
+
+```
+
+Checking normality after log transformation
+
+# Univariate Analysis
+
+### What is the structure of your dataset?
+
+The Prosper Loan dataset has 113937 observations and 81 variables. This dataset contains both catergorical and quantitative variables.
+This dataset contains consumer credit/debt information and loan specific information. The unique identifier of this dataset is the listing key/listing number. I created 2 separate dataframes for this dataset because the variables used in these 2 different time frames are vastly different. I created a dataframe for loans prior to July 2009 and those after.
+
+Things of interest
+
+1. Most borrowers have an income range 25,000-49,000 followed closely by borrowers with range 50,000-79,999. 
+2. Most common loan term is 36 months
+3. Average original loan amount is around $6300 (+/- 6200) so we have a wide spread of loan amounts. The loan term may be a huge differentiator here
+
+### What is/are the main feature(s) of interest in your dataset?
+
+The main features of interest for me is the relationship between a few different variables and a borrower's interest rate. 
+I'd also like to see which clients tend to end up deliquent.\
+
+### What other features in the dataset do you think will help support your \
+investigation into your feature(s) of interest?
+
+The number of investors and income range of borrowers may help support my analysis
+
+### Did you create any new variables from existing variables in the dataset?
+
+I create a new variable called rate_category which puts different ranges of borrower rates into 3 different bins: high, medium, low.
+I also transformed some variables that were right skewed by taking the log of it to help normalize the distribution.
+
+### Of the features you investigated, were there any unusual distributions? \
+Did you perform any operations on the data to tidy, adjust, or change the form \
+of the data? If so, why did you do this? 
+
+Yes, I found a few unusual distributions with credit scores. The minimum values were too low at 0  and 19. I found that these values were entered on loans prior to July 2009 where they used a different variable to assess credit worthiness.
+
+# Bivariate Plots Section
+
+
+###Rate category plotted against categorical variables
+```{r echo=FALSE, message=FALSE, warning=FALSE,Bivariate_Plots113}
+#plot listing cat and rate
+ggplot(loan_data_final, aes(ListingCategory..numeric.)) + 
+  geom_bar(aes(fill = rate_category))
+#plot rate cat and 
+ggplot(loan_data_final, aes(EmploymentStatus)) + geom_bar(aes(fill = rate_category))+ 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+#plot loan status and rate 
+ggplot(loan_data_final, aes(LoanStatus)) + geom_bar(aes(fill = rate_category))+ 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+Here are some bar charts looking at rate category and other categorical variables. Most borrowers are employed. 
+I wanted examine the relationship between different borrower rate cateogories with loan status, employment status, and listing type.
+There seems to be a somewhat equal proportion of interest rate categories for each listing type, with middle interest rates having a slightly higher proportion. We can see the same pattern for the other variables. 
+
+##Contingency Tables
+```{r echo=FALSE, message=FALSE, warning=FALSE,Bivariate_Plots31}
+
+#create contingency table
+mytab <- prop.table(ftable(loan_data_final$LoanStatus,loan_data_final$rate_category),1)
+
+mytab
+
+mytab2 <- ftable(loan_data_final$LoanStatus,loan_data_final$rate_category)
+
+mytab2
+
+```
+
+
+##Chi-squared indepedence test
+```{r echo=FALSE, message=FALSE, warning=FALSE,Bivariate_Plots112}
+#chi squared test
+chisq <- chisq.test(mytab2)
+chisq
+```
+
+Chi-squared indepedence test results indicate that these variables are not independent.
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE,results="hide",Bivariate_Plots1121}
+#chisq$expected results
+round(chisq$expected,2)
+
+#Observed
+round(chisq$observed,2)
+
+```
+
+
+### Chi-squared residuals table
+```{r echo=FALSE, message=FALSE, warning=FALSE,Bivariate_Plots11}
+
+#Residuals
+round(chisq$residuals, 3)
+#corrplot(chisq$residuals, is.cor = FALSE)
+
+```
+
+### Chi-squared results visualized
+```{r echo=FALSE, message=FALSE, warning=FALSE,Bivariate_Plots41}
+
+#convert the data as a table
+#dt <- as.data(as.matrix(mytab2))
+#table to dataframe
+dt <- as.data.frame(as.matrix(mytab2))
+
+#balloonplot(t(dt), main ="Loan Status & Rate Category Contingency Table", xlab ="", ylab="",
+#            label = FALSE, show.margins = FALSE)
+
+#theme_set(theme_pubr())
+#baloon plot for table
+ggballoonplot(dt) + ggtitle("Loan status & Borrower Rate Contingency Table Visualized")
+
+
+```
+
+
+When looking at loan status and rate category, we can see that borrowers with lower rates are less likely to default and charge off a loan. It is evident from the chi squared test that there is an positive association between high rates and charge offs.
+
+###Debt to Income ratio
+```{r echo=FALSE, message=FALSE, warning=FALSE,Bivariate_Plots1}
+
+ggplot(loan_data_final, aes(x=DebtToIncomeRatio, y=BorrowerRate)) +
+    geom_point(shape=1) +    # Use hollow circles
+    geom_smooth(method=lm,   # Add linear regression line
+                se=FALSE)    # Don't add shaded confidence region
+
+print("DebtToIncomeRatio Summary")
+summary(loan_data_final$DebtToIncomeRatio)
+
+```
+Doesn't seem to be a clear relationship here. Higher debt to income ratio does not translate into higher rates.
+
+
+###Other boxplots
+```{r echo=FALSE, message=FALSE, warning=FALSE,Bivariate_Plots2}
+
+# plot
+ggplot(loan_data_final, aes(x=IncomeRange, y=BorrowerRate, fill=IncomeRange)) +
+    geom_boxplot(alpha=0.4) +
+    stat_summary(fun.y=mean, geom="point", shape=20, size=5, color="red", fill="red") +
+    theme(legend.position="none") +
+    scale_fill_brewer(palette="Set3") + theme(axis.text.x = element_text(angle = 60, hjust = 1))
+
+#summary(subset(loan_data_final, IncomeRange == "Not displayed")$BorrowerRate)
+
+
+```
+
+Figure above shows the distribution of borrower rates by income range. Those with Income Range reported as "Not Employed" 
+seem to have the highest median and mean rate. Borrowers with higher income ranges have lower mean and median values. There are some 
+outliers for borrowers whose income range is categorized as Not displayed. 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE,Bivariate_Plots3}
+
+# plot income v creditscore
+ggplot(post2009, aes(x=IncomeRange, y=CreditScoreRangeLower, fill=IncomeRange)) +
+    geom_boxplot(alpha=0.4) +
+    stat_summary(fun.y=mean, geom="point", shape=20, size=5, color="red", fill="red") +
+    theme(legend.position="none") +
+    scale_fill_brewer(palette="Set3") + theme(axis.text.x = element_text(angle = 60, hjust = 1))
+ 
+
+```
+
+Borrowers with lower incomes have lower median and average credit scores. Borrowers with income 100k+ have highest credit scores.
+
+####Mean, Median and Standard Deviation of creditScors by Income Range
+```{r echo=FALSE, message=FALSE, warning=FALSE,Bivariate_Plots4}
+
+# Calculate avg, median, and sd credit score by income range
+aggregate(CreditScoreRangeLower~IncomeRange,post2009,mean)
+aggregate(CreditScoreRangeLower~IncomeRange,post2009,median)
+aggregate(CreditScoreRangeLower~IncomeRange,post2009,sd)
+
+```
+There does seem to be some correlation between income and credit scores, so I will run a significance test to verify. 
+
+Null h: There is no differece between the means of each income group
+Alt hyp: There is a difference between the means of each income group
+
+```{r echo=FALSE, message=FALSE,warning=FALSE,Bivariate_Plots5}
+
+# Run ANOVA
+model_income_score <- aov(post2009$CreditScoreRangeLower~post2009$IncomeRange)
+summary(model_income_score)
+```
+
+
+```{r echo=FALSE, message=FALSE, results="hide",warning=FALSE,Bivariate_Plots512}
+
+# Run post-hoc test if F statistic is significant
+TukeyHSD(model_income_score)
+
+```
+
+The significance test results show that there is statistically significant difference beteween the mean credit scores of these different income groups so we will reject the null hypothesis. The 2 groups with the largest variance are the Not displayed income group and $100,000. The data suggests that higher income groups have higher average credit scores.
+
+
+###More boxplot fun
+```{r echo=FALSE, message=FALSE, warning=FALSE,Bivariate_Plots6}
+
+# plot
+ggplot(pre2009, aes(x=CreditGrade, y=BorrowerRate, fill=CreditGrade)) +
+    geom_boxplot(alpha=0.4) +
+    stat_summary(fun.y=mean, geom="point", shape=20, size=5, color="red", fill="red") +
+    theme(legend.position="none") +
+    scale_fill_brewer(palette="Set3") + 
+    theme(axis.text.x = element_text(angle = 60, hjust = 1))
+ 
+```
+
+
+Borrowers with AA credit grade have Lowest rates and  highest rates have E and HR grades.
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE,Bivariate_Plots7}
+
+ggplot(loan_data_final, aes(x=CurrentDelinquencies, y=BorrowerRate)) +
+   geom_point()     # Use hollow circles
+   # geom_smooth(method=lm,   # Add linear regression line
+    #            se=FALSE)    # Don't add shaded confidence region
+
+
+```
+
+I wanted to see if there was any correlation between rates and number of current delinquencies. Most borrowers have under 20. 
+
+##Correlation Matrix
+
+```{r echo=FALSE, message=FALSE, warning=FALSE,Bivariate_Plots8}
+
+#new dataframe with a few select columns for matrix scatterpot
+post2009_filter <- subset(post2009,  select=c(CreditScoreRangeUpper,BorrowerRate,DebtToIncomeRatio,Investors,LenderYield,
+   LoanOriginalAmount,CurrentDelinquencies,DelinquenciesLast7Years,PublicRecordsLast10Years,StatedMonthlyIncome))
+
+#drop rows where na
+post2009_filter_nona <- tidyr::drop_na(post2009_filter)
+#create scatterplot matrix to check assumptions
+
+#Dataframe including income range (cat variable)
+post2009_filter2 <- subset(post2009,  select=c(CreditScoreRangeUpper,BorrowerRate,
+  DebtToIncomeRatio,Investors, LenderYield,LoanOriginalAmount,CurrentDelinquencies,
+  DelinquenciesLast7Years,IncomeRange))
+
+
+#correlation matrix 
+#ggcorr(post2009_filter, palette = "RdYlGn", name = "rho", label = TRUE, label_color = "black")
+
+#ggpairs(post2009_filter_nona) + theme(axis.text.x = element_text(angle = 90, 
+#                                                            vjust = 1, color = "black"))
+
+#Correlation matrix
+corr <- round(cor(post2009_filter_nona), 1)
+#corr
+
+#Plot 
+ggcorrplot(corr, hc.order = TRUE, 
+           type = "lower", 
+           lab = TRUE, 
+           lab_size = 3, 
+           method="circle", 
+           colors = c("tomato2", "white", "springgreen3"), 
+           title="Correlogram Loan Data", 
+           ggtheme=theme_bw)
+
+```
+
+I created a correlation matrix and plotted it to quickly see the correlation between multiple variables. The strongest correlation is between borrower rate and lender yield. 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE,Bivariate_Plots9}
+
+#scatter plot credit scores/borrow rate
+ggplot(post2009, aes(x=LoanOriginalAmount, y=BorrowerRate)) +
+   geom_point()     # Use hollow circles
+   # geom_smooth(method=lm,   # Add linear regression line
+    #            se=FALSE)    # Don't add shaded confidence region
+
+```
+
+Scatter plot of original loan amount and borrower rate. Looks like there is somewhat of a negative correlation here.
+
+##Linear Regression BorrowerRate ~ LoanOriginal Amount
+```{r echo=FALSE, message=FALSE, results="hide",warning=FALSE,Bivariate_Plots15}
+#create function to use
+ggplotRegression <- function (fit) {
+
+require(ggplot2)
+
+ggplot(fit$model, aes_string(x = names(fit$model)[2], y = names(fit$model)[1])) + 
+  geom_point() +
+  stat_smooth(method = "lm", col = "red") +
+  labs(title = paste("Adj R2 = ",signif(summary(fit)$adj.r.squared, 5),
+                     "Intercept =",signif(fit$coef[[1]],5 ),
+                     " Slope =",signif(fit$coef[[2]], 5),
+                     " P =",signif(summary(fit)$coef[2,4], 5)))
+}
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE,Bivariate_Plots151}
+#check normality 
+hist(post2009$LoanOriginalAmount,xlab="LoanOriginalAmount", main="LoanOriginalAmount Distribution")
+
+#transform loan original amount
+post2009$LoanOriginalAmount <- log(post2009$LoanOriginalAmount)
+```
+
+Need to take log of LoanOriginalAmount before running regression
+
+####Model build
+```{r echo=FALSE, message=FALSE, warning=FALSE,Bivariate_Plots1566}
+#check normality again
+#hist(post2009$LoanOriginalAmount)
+
+#create linear regression model
+linearMod <- lm(BorrowerRate ~ LoanOriginalAmount, data=post2009)  # build linear regression model on full data
+#print(linearMod)
+
+summary(linearMod)
+
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE,Bivariate_Plots1512}
+ggplotRegression(linearMod)
+
+```
+
+
+I performed linear regression to predict to the value of borrow rates using original loan amount. R-squared is pretty low so I will try another variable.
+
+
+##Testing next set of variables,  LenderYield ~  BorrowerRate
+```{r echo=FALSE, message=FALSE, warning=FALSE,Bivariate_Plots10}
+#scatter plot 
+ggplot(post2009, aes(x=LenderYield, y=BorrowerRate)) +
+   geom_point()     # Use hollow circles
+   # geom_smooth(method=lm,   # Add linear regression line
+    #            se=FALSE)    # Don't add shaded confidence region
+
+#check normality 
+hist(post2009$LenderYield, main="LenderYield Distribution",xlab="Lender Yield")
+hist(post2009$BorrowerRate, main="Borrower Rate Distrubition",xlab="Borrower Rate")
+
+```
+
+Checking these borrwer rate and lender yield normaility in the first two graph and strong positive correlation.
+
+
+##Linear Regression Model #2 BorrowerRate ~ LenderYield
+```{r echo=FALSE, message=FALSE, warning=FALSE,results="hide",Bivariate_Plots100}
+#create linear regression model
+linearMod2 <- lm(BorrowerRate ~ LenderYield, data=post2009)  # build linear regression model on full data
+#print(linearMod)
+
+summary(linearMod2)
+
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE,Bivariate_Plots1001}
+#plot model 2
+ggplotRegression(linearMod2)
+
+```
+
+Very strong positive correlation between these two variables. It's probably the result of the lender yield being calculated from the borrower rate.
+
+
+# Bivariate Analysis
+
+### Talk about some of the relationships you observed in this part of the \
+investigation. How did the feature(s) of interest vary with other features in \
+the dataset?
+
+I mainly focused on what variables had an association with a borrower's interest rate.
+I created a few contingency tables with different variables and found rate category and loan status to be the most interesting.
+I did a chi-squared indepedence test on these 2 variables and found that they are not independent. Rate does have an association with loan status.
+I found that there is statistically significant difference beteween the mean credit scores of between income range groups.
+The data suggests that higher income groups have higher average credit scores.
+
+
+### Did you observe any interesting relationships between the other features \
+(not the main feature(s) of interest)?
+
+I thought it was interesting that there didn't seem to be any relationship between debt to income ratio and interest rate.
+I would have assumed that this would have a big impact on borrower rate, but it does not.
+
+# Multivariate Plots Section
+
+##Scatter plots
+```{r echo=FALSE, message=FALSE, warning=FALSE,Multivariate_Plots0}
+#Plot credit score, rate and color by prosper score
+ggplot(post2009, aes(x=MonthlyLoanPayment, y=LoanCurrentDaysDelinquent, color=LoanStatus)) +
+   geom_point()     # Use hollow circles
+   # geom_smooth(method=lm,   # Add linear regression line
+    #            se=FALSE)    # Don't add shaded confidence region
+
+
+```
+
+I wanted to see if there was any corrleation between the amount of monthly payments and loan deliquencies. It does not seem that there is. Perhaps, borrowers with weak credit profiles tend to have lower monthly payments because of the smaller loan amounts.
+
+##More explorations
+```{r echo=FALSE, message=FALSE, warning=FALSE,Multivariate_Plots1}
+#Plot credit score, rate and color by prosper score
+ggplot(loan_data_final, aes(x=LoanOriginalAmount, y=MonthlyLoanPayment, color=rate_category)) +
+   geom_point()     # Use hollow circles
+   # geom_smooth(method=lm,   # Add linear regression line
+    #            se=FALSE)    # Don't add shaded confidence region
+
+
+#Plot credit score, rate and color by prosper score
+ggplot(loan_data_final, aes(x=LoanOriginalAmount, y=MonthlyLoanPayment, color=Term)) +
+   geom_point()     # Use hollow circles
+   # geom_smooth(method=lm,   # Add linear regression line
+    #            se=FALSE)    # Don't add shaded confidence region
+
+
+
+```
+
+This plot shows monthly loan payments against original loan amounts. The colors represent the different rate category bins. I noticed that there are no high interest loans with original loan amounts greater than 25,000 and no 12 month loans above 25,000.
+
+
+
+##Table aggregations
+```{r echo=FALSE, message=FALSE, warning=FALSE,Multivariate_Plots2}
+#aggregate by term/rate
+print("Median LoanOriginal Amount by rate category and term")
+aggregate(x = loan_data_final[c("LoanOriginalAmount","MonthlyLoanPayment")], 
+                               by = loan_data_final[c("rate_category","Term")],
+                               FUN = median)
+
+#check max loan amounts by rate and term
+print("Max LoanOriginal Amount by rate category and term")
+aggregate(x = loan_data_final[c("LoanOriginalAmount")], 
+                               by = loan_data_final[c("rate_category","Term")],
+                               FUN = max)
+
+
+
+```
+
+Here I aggregated the median loan original amount and monthly loan payment by loan term and borrower rate category.
+Borrowers with higher tend to have lower amounts than borrowers with loans with higher interest rates except when they have 12 month 
+term loans.The original loan amount is the same, but the monthly loan payment is higher due to higher interest.
+
+I also wanted to see what the max loan amounts were by rate and term. Again, borrowers with loans with higher rates have much lower original loan amount.
+
+##Other plots
+```{r echo=FALSE, message=FALSE, warning=FALSE,Multivariate_Plots3}
+#Plot credit score, rate and color by prosper score
+ggplot(post2009, aes(x=CreditScoreRangeLower, y=BorrowerRate, color=ProsperRating..Alpha.)) +
+   geom_point()     # Use hollow circles
+   # geom_smooth(method=lm,   # Add linear regression line
+    #            se=FALSE)    # Don't add shaded confidence region
+
+
+```
+
+
+There doesn't seem to be a clear relationship between credit score and interest rate as I'd assumed, but we can see from this graph that borrowers with lower ProsperRatings generally have higher interest rates. Those with higher ratings also tend to have higher credit scores. There must be several other factors that are used to calculate prosper rating score.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE,Multivariate_Plots4}
+#Plot credit score, rate and color by prosper score
+ggplot(pre2009, aes(x=LoanOriginalAmount, y=Investors, color=IncomeRange)) +
+   geom_point() + geom_jitter(width = .5, size=1)    # Use hollow circles
+   # geom_smooth(method=lm,   # Add linear regression line
+    #            se=FALSE)    # Don't add shaded confidence region
+
+
+```
+
+
+The larger the loan amount the, more number of investors you have, however, loans where borrower's income information was missing or not available had a much lower number of investors.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE,results="hide",Multivariate_Plots5}
+#mutilple linear regression model on post July 2009 data
+post2009_mlr <- subset(post2009,  select=c(CreditScoreRangeUpper,BorrowerRate,
+  DebtToIncomeRatio,Investors,LenderYield,LoanOriginalAmount,CurrentDelinquencies,
+  DelinquenciesLast7Years,PublicRecordsLast10Years,StatedMonthlyIncome,
+  IncomeRange,Term,ProsperRating..Alpha.,ListingCategory..numeric.,rate_category))
+  
+#check missing data
+sapply(post2009_mlr, function(x) sum(is.na(x)))
+
+#drop rows where na
+post2009_dropna <- tidyr::drop_na(post2009_mlr)
+
+#check na again
+sapply(post2009_dropna, function(x) sum(is.na(x)))
+#plot histogram of borrower rate afer dropping NA rows
+hist(post2009_dropna$BorrowerRate, xlab="Borrower Rate", main="Borrower Rate Distribution")
+
+```
+
+
+##Multiple Linear Regression Model 1
+```{r echo=FALSE, message=FALSE, warning=FALSE,results="hide",Multivariate_Plots6}
+
+# build linear regression model on post July 2009 data
+linearMod3 <- lm(BorrowerRate ~ CreditScoreRangeUpper + DebtToIncomeRatio + 
+                   Investors + DelinquenciesLast7Years + ProsperRating..Alpha.+
+                   ListingCategory..numeric.+PublicRecordsLast10Years+
+                   StatedMonthlyIncome+IncomeRange , data=post2009_dropna) 
+#print(linearMod3)
+
+summary(linearMod3)
+
+```
+
+I dropped rows with missing data and built a linear regression model. There are some variables we can exclude from our model. They have fairly large p-values.
+
+## Multiple Linear Regression Model 2
+```{r echo=FALSE, message=FALSE, warning=FALSE,results="hide",Multivariate_Plots7}
+#mutilple linear regression model after dropping some variables
+linearMod4 <- lm(BorrowerRate ~ CreditScoreRangeUpper + Investors + 
+                   DelinquenciesLast7Years + ProsperRating..Alpha.+
+                   ListingCategory..numeric.+IncomeRange , data=post2009_dropna)  
+#print(linearMod4)
+summary(linearMod4)
+```
+
+####Model 2 Results Summary
+```{r echo=FALSE, message=FALSE, warning=FALSE,results="hide",Multivariate_Plots77}
+#call func to plot model
+ggplotRegression(linearMod4)
+
+```
+
+Very small p-value and strong r-squared value (0.92) indicates a strong association between borrower rates and all the variables included in the model.
+
+###Model Diagnostics
+```{r echo=FALSE, message=FALSE, warning=FALSE,Multivariate_Plots71}
+#check if any assumptions are violated
+par(mfrow=c(2,2))
+plot(linearMod4)
+
+```
+
+Here we have some dianostics graphs to assess whether or not this model violates any linear regression assumptions.
+
+# Multivariate Analysis
+
+### Talk about some of the relationships you observed in this part of the \
+investigation. Were there features that strengthened each other in terms of 
+looking at your feature(s) of interest?
+
+Borrowers with higher credit scores and Prosper Scores get bigger loans with lower interest rates. I also noticed that the larger the loan amount the, more number of investors you have, however, loans where borrower's income information was missing or not available had a much lower number of investors. These borrowers probably seem riskier.
+
+### Were there any interesting or surprising interactions between features?
+Honestly, there was nothing really surprising here. Most of the data validates what you would expect in the lending business. Riskier clients have weaker credit profiles.
+
+
+### OPTIONAL: Did you create any models with your dataset? Discuss the \
+strengths and limitations of your model.
+
+I created a few models with  my dataset trying to predict borrower rate. The issue with using borrower rate as the dependent variable in my linear regression model, was that although the the variable is contniuous, there were only around 400-500 distinct values. The rates tend to cluster around certain values such as 0.05 or 0.25. This was a problem with performing initial diagnostics. Although the residual v fitted plots showed clusters around certain values, the variance is constant.
+
+The model has a strong p-value of 0.91 indicating that there is a strong linear relationship between borrower rate and 
+variable concerning a customer's credit rating and oddly the number of investors on that loan.
+
+------
+
+# Final Plots and Summary
+
+### Plot One
+```{r echo=FALSE, message=FALSE, warning=FALSE,Plot_One}
+
+# box plot of income range v borrower rate
+ggplot(post2009, aes(x=IncomeRange, y=CreditScoreRangeLower, fill=IncomeRange)) +
+    geom_boxplot(alpha=0.4) +
+    stat_summary(fun.y=mean, geom="point", shape=20, size=5, color="red", fill="red") +
+    theme(legend.position="none") +
+    scale_fill_brewer(palette="Set3") + 
+    theme(axis.text.x = element_text(angle = 60, hjust = 1)) +
+    ggtitle("Income Range v Credit Scores Boxplot")
+
+```
+
+### Description One
+This boxplot shows the the different ranges in credit scores by income range. This shows that borrowers with very income 100k+ have the high median and average credit scores. Those who reported 0 income and those in the next lowest income bracket have the lowest average/median credit scores.
+Oddly, borrowers that report "not employed" have a similar credit scores as the 75-99k income range borrowers.
+
+### Plot Two
+```{r echo=FALSE, message=FALSE, warning=FALSE,Plot_Two}
+
+# plot
+#Plot credit score, rate and color by prosper score
+ggplot(pre2009, aes(x=LoanOriginalAmount, y=Investors, color=IncomeRange)) +
+  geom_point() + geom_jitter(width = .5, size=1) + 
+  ggtitle("Investors v Loan Original Amount")
+  # Use hollow circles
+   # geom_smooth(method=lm,   # Add linear regression line
+    #            se=FALSE)    # Don't add shaded confidence region
+
+
+```
+
+### Description Two
+On this plot you can see that there is a positive association between the number of investors and original loan amount. Bigger loan sizes have a higher number of investors, however, loans where borrower's income information was missing or not available had a much lower number of investors. Most lenders probably do not want to invest in a loan that seems risky.
+ 
+
+### Plot Three
+```{r echo=FALSE, message=FALSE, warning=FALSE,Plot_Three}
+#residuals
+round(chisq$residuals, 3)
+#plot
+ggballoonplot(dt) + ggtitle("Loan status & Borrower Rate Contingency Table Visualized")
+
+```
+
+### Description Three
+The third plot describes the relationship between loan status and borrower rate category. I binned the rates into 3 different categories: low, middle, high using different quartiles. This visual  and residualt able show an evident  association between high interest loan borrowers and charged off loan status. It also shows a strong  association between low interest borrowers and chargedoff status. In essence, borrowers with loans with high rates are more likely to become deliquent on their loans. 
+
+------
+
+# Reflection
+
+Although this dataset was not "large" according to today's standrads, there were a ton of variables. For this project, I did not explore all variables, but only focused on a subset that related to credit worthiness and borrower information. The main issue I encountered with this dataset, was difference between data recorded before July 2009 and post 2009. There must have been  a massive upgrade or change in their process prior to July 2009. I mainly focused on post July 2009data , because that is when they started using FICO credit scores and introduced ProsperRatings, an in house credit grade.
+
+I focused on analyzing relationships between interest rates and a borrower's credit worthiness. Some variables were multimodal and some had outliers that ended up being junk data. Some categorical variables were being treated as numerical, so I had to factor them before I could perform any analysis. When trying to build one of my linear regression models, I noticed that the using borrower rate as the dependent variable is a little problematic due to the nature of the possible values. There are less than 500 unique values and those values tend to be centered around 0.05 decimal places. This proved to be an issue when looking at the residuals v fitted plot. The was equal variance, but the datapoints where centered around certain borrow rate values.
+
+Overall, this was a clean dataset that didn't require much transformation. The majority of borrowers in this sample have an average ProsperScore rating of C and an average credit range of 686-705. These averages will change depending income level.
+
+This analysis proves that there is an association between a borrower's credit worthiness and his or her interest rate. Borrowers with weaker credit profiles generally have higher interest rates. Borrowers with low or no income have weaker credit scores. 
+
+I've only touched on a few variables in this dataset so I know you could go much deeper by possibly including dates and other loan specific information.
+
+
+
